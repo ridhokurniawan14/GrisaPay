@@ -1,0 +1,103 @@
+<?php
+
+namespace App\Filament\Resources\Users;
+
+use App\Filament\Resources\Users\Pages\CreateUser;
+use App\Filament\Resources\Users\Pages\EditUser;
+use App\Filament\Resources\Users\Pages\ListUsers;
+use App\Filament\Resources\Users\Schemas\UserForm;
+use App\Filament\Resources\Users\Tables\UsersTable;
+use App\Models\User;
+use BackedEnum;
+use Filament\Resources\Resource;
+use Filament\Schemas\Schema;
+use Filament\Support\Icons\Heroicon;
+use Filament\Tables\Table;
+use App\Enums\RoleName;
+use Illuminate\Database\Eloquent\Model;
+
+class UserResource extends Resource
+{
+    protected static ?string $model = User::class;
+
+    protected static string|BackedEnum|null $navigationIcon = Heroicon::OutlinedUsers;
+
+    public static function form(Schema $schema): Schema
+    {
+        return UserForm::configure($schema);
+    }
+
+    public static function table(Table $table): Table
+    {
+        return UsersTable::configure($table);
+    }
+
+    public static function getRelations(): array
+    {
+        return [
+            //
+        ];
+    }
+
+    public static function getPages(): array
+    {
+        return [
+            'index' => ListUsers::route('/'),
+            'create' => CreateUser::route('/create'),
+            'edit' => EditUser::route('/{record}/edit'),
+        ];
+    }
+    public static function canViewAny(): bool
+    {
+        $actor = auth()->user();
+
+        return $actor !== null && ($actor->can('users.view') || $actor->can('users.manage'));
+    }
+
+    public static function canCreate(): bool
+    {
+        return auth()->user()?->can('users.manage') ?? false;
+    }
+
+    public static function canEdit(Model $record): bool
+    {
+        $actor = auth()->user();
+
+        if ($actor === null || ! $actor->can('users.manage')) {
+            return false;
+        }
+
+        // Hanya Super Admin yang boleh mengubah akun Super Admin.
+        return ! $record->hasRole(RoleName::SuperAdmin->value) || $actor->hasRole(RoleName::SuperAdmin->value);
+    }
+
+    public static function canDelete(Model $record): bool
+    {
+        return false;
+    }
+
+    public static function canDeleteAny(): bool
+    {
+        return false;
+    }
+
+    public static function getModelLabel(): string
+    {
+        return 'Pengguna';
+    }
+
+    public static function getPluralModelLabel(): string
+    {
+        return 'Pengguna';
+    }
+
+    public static function getNavigationGroup(): ?string
+    {
+        return 'Pengaturan';
+    }
+
+    public static function getNavigationSort(): ?int
+    {
+        return 1;
+    }
+}
