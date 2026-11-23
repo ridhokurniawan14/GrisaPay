@@ -8,6 +8,7 @@ use App\Support\PermissionGroups;
 use Filament\Forms\Components\CheckboxList;
 use Filament\Forms\Components\Hidden;
 use Filament\Forms\Components\TextInput;
+use Filament\Forms\Components\ViewField;
 use Filament\Schemas\Components\Grid;
 use Filament\Schemas\Components\Section;
 use Filament\Schemas\Schema;
@@ -46,6 +47,12 @@ class RoleForm
                 Section::make('Hak akses')
                     ->description('Centang hak akses yang dimiliki peran ini. Super Admin otomatis memiliki semua hak akses, sehingga tidak perlu diatur.')
                     ->schema([
+                        // Bilah cari dan tombol massal: murni tampilan, tidak ikut disimpan.
+                        ViewField::make('permission_toolbar')
+                            ->view('filament.forms.permission-toolbar')
+                            ->hiddenLabel()
+                            ->dehydrated(false)
+                            ->columnSpanFull(),
                         Grid::make(2)->schema($groupCards),
                     ])
                     ->visible(fn(?Role $record): bool => $record?->name !== RoleName::SuperAdmin->value)
