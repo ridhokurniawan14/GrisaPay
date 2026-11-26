@@ -6,6 +6,7 @@ use App\Support\ReportBrand;
 use PhpOffice\PhpSpreadsheet\Cell\Coordinate;
 use PhpOffice\PhpSpreadsheet\Cell\DataType;
 use PhpOffice\PhpSpreadsheet\Spreadsheet;
+use PhpOffice\PhpSpreadsheet\Style\Conditional;
 use PhpOffice\PhpSpreadsheet\Style\Alignment;
 use PhpOffice\PhpSpreadsheet\Style\Border;
 use PhpOffice\PhpSpreadsheet\Style\Fill;
@@ -87,55 +88,76 @@ final class ExcelReport
         ]);
         $ws->getRowDimension($row)->setRowHeight(34);
 
-        // Isi
+        // Isi: nilai ditulis per sel, tetapi gaya (format, rata, zebra) dipasang per KOLOM sekali saja.
+        // Menata gaya sel satu per satu sangat berat untuk ribuan baris (memori habis / halaman putih).
         $firstData = $row + 1;
+        $statusCells = [];
 
-        foreach ($report->rows as $index => $data) {
+        foreach (array_values($report->rows) as $data) {
             $row++;
 
             foreach ($cols as $i => $col) {
                 $coord = Coordinate::stringFromColumnIndex($i + 1).$row;
                 $value = $data[$col['key']] ?? null;
-                $type = $col['type'] ?? 'text';
 
-                if ($type === 'text') {
+                if (($col['type'] ?? 'text') === 'text') {
                     $ws->setCellValueExplicit($coord, (string) ($value ?? ''), DataType::TYPE_STRING); // NISN "0117..." tetap utuh
                 } else {
                     $ws->setCellValueExplicit($coord, (int) ($value ?? 0), DataType::TYPE_NUMERIC);
                 }
 
-                if ($type === 'money') {
-                    $ws->getStyle($coord)->getNumberFormat()->setFormatCode(self::MONEY);
-                }
-
-                $align = $col['align'] ?? match ($type) {
-                    'money' => 'right',
-                    'int' => 'center',
-                    default => 'left',
-                };
-                $ws->getStyle($coord)->getAlignment()->setHorizontal($align)->setVertical(Alignment::VERTICAL_CENTER);
-
                 if ($report->statusKey === $col['key'] && isset(self::STATUS_COLORS[(string) $value])) {
-                    [$bg, $fg] = self::STATUS_COLORS[(string) $value];
-                    $ws->getStyle($coord)->getFill()->setFillType(Fill::FILL_SOLID)->getStartColor()->setARGB('FF'.$bg);
-                    $ws->getStyle($coord)->getFont()->setBold(true)->getColor()->setARGB('FF'.$fg);
-                    $ws->getStyle($coord)->getAlignment()->setHorizontal(Alignment::HORIZONTAL_CENTER);
-                }
-            }
-
-            if ($index % 2 === 1) {
-                foreach ($cols as $i => $col) {
-                    if ($report->statusKey === $col['key']) {
-                        continue;
-                    }
-
-                    $ws->getStyle(Coordinate::stringFromColumnIndex($i + 1).$row)->getFill()
-                        ->setFillType(Fill::FILL_SOLID)->getStartColor()->setARGB('FFF3F4F6');
+                    $statusCells[$coord] = self::STATUS_COLORS[(string) $value];
                 }
             }
         }
 
         $lastData = $row;
+
+        if ($lastData >= $firstData) {
+            foreach ($cols as $i => $col) {
+                $letter = Coordinate::stringFromColumnIndex($i + 1);
+                $type = $col['type'] ?? 'text';
+                $style = $ws->getStyle("{$letter}{$firstData}:{$letter}{$lastData}");
+
+                if ($type === 'money') {
+                    $style->getNumberFormat()->setFormatCode(self::MONEY);
+                }
+
+                $style->getAlignment()
+                    ->setHorizontal($col['align'] ?? match ($type) {
+                        'money' => 'right',
+                        'int' => 'center',
+                        default => 'left',
+                    })
+                    ->setVertical(Alignment::VERTICAL_CENTER);
+            }
+
+            // Zebra: satu aturan format bersyarat untuk seluruh tabel.
+            if ($report->statusKey === null) {
+                $zebra = new Conditional();
+                $zebra->setConditionType(Conditional::CONDITION_EXPRESSION)->addCondition('MOD(ROW()-'.$firstData.',2)=1');
+                $zebra->getStyle()->getFill()->setFillType(Fill::FILL_SOLID)->getStartColor()->setARGB('FFF3F4F6');
+                $zebra->getStyle()->getFill()->getEndColor()->setARGB('FFF3F4F6');
+                $ws->getStyle("A{$firstData}:{$last}{$lastData}")->setConditionalStyles([$zebra]);
+            } else {
+                // Laporan berstatus (jumlah baris kecil): zebra per sel agar warna status tidak tertimpa.
+                for ($r = $firstData + 1; $r <= $lastData; $r += 2) {
+                    foreach ($cols as $i => $col) {
+                        if ($report->statusKey !== $col['key']) {
+                            $ws->getStyle(Coordinate::stringFromColumnIndex($i + 1).$r)->getFill()
+                                ->setFillType(Fill::FILL_SOLID)->getStartColor()->setARGB('FFF3F4F6');
+                        }
+                    }
+                }
+            }
+
+            foreach ($statusCells as $coord => [$bg, $fg]) {
+                $ws->getStyle($coord)->getFill()->setFillType(Fill::FILL_SOLID)->getStartColor()->setARGB('FF'.$bg);
+                $ws->getStyle($coord)->getFont()->setBold(true)->getColor()->setARGB('FF'.$fg);
+                $ws->getStyle($coord)->getAlignment()->setHorizontal(Alignment::HORIZONTAL_CENTER);
+            }
+        }
 
         // Total
         if ($report->totalKeys !== [] && $report->rows !== []) {

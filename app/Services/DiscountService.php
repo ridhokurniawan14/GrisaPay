@@ -7,6 +7,7 @@ use App\Models\BillItem;
 use App\Models\Discount;
 use App\Models\DiscountAllocation;
 use App\Models\User;
+use App\Support\PendingNotifier;
 use DomainException;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
@@ -19,7 +20,7 @@ use Illuminate\Support\Facades\DB;
 final class DiscountService
 {
     /** @param array<string, mixed> $data bill_id, discount_type_id, scope, fee_category_id?, bill_item_id?, mode, value, reason */
-    public function request(array $data, User $by): Discount
+    public function request(array $data, User $by, bool $notify = true): Discount
     {
         $bill = Bill::query()->findOrFail($data['bill_id']);
 
@@ -49,6 +50,10 @@ final class DiscountService
         ]);
 
         $this->log($discount, $by, 'Diskon diajukan');
+
+        if ($notify) {
+            DB::afterCommit(fn () => PendingNotifier::discountsRequested(1, $discount->type->name, $by));
+        }
 
         return $discount;
     }
@@ -110,13 +115,18 @@ final class DiscountService
                         'mode' => $data['mode'],
                         'value' => (int) $data['value'],
                         'reason' => $data['reason'],
-                    ], $by);
+                    ], $by, notify: false);
                     $created++;
                 } catch (DomainException $e) {
                     $skipped[] = "{$label}: {$e->getMessage()}";
                 }
             }
         });
+
+        if ($created > 0) {
+            $typeName = \App\Models\DiscountType::query()->whereKey($data['discount_type_id'])->value('name') ?? 'Diskon';
+            DB::afterCommit(fn () => PendingNotifier::discountsRequested($created, $typeName, $by));
+        }
 
         return ['created' => $created, 'skipped' => $skipped];
     }

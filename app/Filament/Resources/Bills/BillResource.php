@@ -7,8 +7,13 @@ use App\Exports\BillReportBuilder;
 use App\Exports\ReportDownloader;
 use App\Filament\Resources\Bills\Pages\ListBills;
 use App\Models\AcademicYear;
+use App\Filament\Resources\Payments\PaymentResource;
 use App\Models\Bill;
+use App\Models\Payment;
 use App\Services\BillSummary;
+use App\Services\PaymentService;
+use App\Support\WhatsApp;
+use Filament\Actions\Action;
 use BackedEnum;
 use Filament\Actions\BulkAction;
 use Filament\Actions\BulkActionGroup;
@@ -50,15 +55,20 @@ class BillResource extends Resource
     {
         return $table
             ->modifyQueryUsing(fn ($query) => $query
-                ->with(['student', 'academicYear'])
+                ->with(['student.guardians', 'academicYear'])
                 ->withSum('items as items_amount', 'amount')
                 ->withSum('items as items_discount', 'discount_amount'))
             ->defaultSort('classroom_name')
+            ->poll('30s')
             ->columns([
                 TextColumn::make('student.name')->label('Siswa')->searchable()->sortable(),
                 TextColumn::make('student.nisn')->label('NISN')->searchable(),
                 TextColumn::make('classroom_name')->label('Kelas')->searchable()->sortable(),
                 TextColumn::make('academicYear.code')->label('Tahun ajaran'),
+                TextColumn::make('wa_target')->label('WA ke')
+                    ->state(fn (Bill $r): string => ($t = WhatsApp::target($r->student)) ? $t['label'] : 'Belum ada nomor')
+                    ->color(fn (Bill $r): string => WhatsApp::target($r->student) ? 'gray' : 'danger')
+                    ->toggleable(isToggledHiddenByDefault: true),
                 TextColumn::make('items_amount')
                     ->label('Tagihan')
                     ->formatStateUsing(fn ($state): string => 'Rp '.number_format((int) $state, 0, ',', '.'))
@@ -80,6 +90,24 @@ class BillResource extends Resource
                     ->searchable(),
             ])
             ->recordActions([
+                Action::make('wa')
+                    ->label('WA')
+                    ->icon('heroicon-o-chat-bubble-left-right')
+                    ->color('success')
+                    ->visible(fn (): bool => (bool) auth()->user()?->can(PermissionName::BillsView->value))
+                    ->disabled(fn (Bill $r): bool => WhatsApp::target($r->student) === null)
+                    ->tooltip(fn (Bill $r): string => ($t = WhatsApp::target($r->student)) ? 'Kirim WA ke '.$t['label'] : 'Nomor wali maupun siswa belum ada')
+                    ->url(function (Bill $r): ?string {
+                        $t = WhatsApp::target($r->student);
+
+                        if ($t === null) {
+                            return null;
+                        }
+
+                        $remaining = app(PaymentService::class)->outstandingTotal($r->student);
+
+                        return WhatsApp::link($t['number'], WhatsApp::arrearsMessage($r->student, (string) $r->classroom_name, $remaining));
+                    }, shouldOpenInNewTab: true),
                 ViewAction::make()
                     ->label('Rincian')
                     ->icon('heroicon-o-eye')
@@ -92,6 +120,14 @@ class BillResource extends Resource
                         'student' => $record->student,
                         'year' => $record->academicYear,
                         'summary' => BillSummary::forStudent($record->student, $record->academicYear),
+                        'payments' => Payment::query()
+                            ->where('student_id', $record->student_id)
+                            ->with(['creator', 'prints'])
+                            ->latest('paid_at')
+                            ->limit(5)
+                            ->get(),
+                        'paymentsTotal' => Payment::query()->where('student_id', $record->student_id)->count(),
+                        'historyUrl' => PaymentResource::getUrl('index').'?activeTab=semua&siswa='.$record->student_id,
                     ])),
             ])
             ->toolbarActions([

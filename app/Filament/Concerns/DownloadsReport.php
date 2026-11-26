@@ -20,8 +20,32 @@ trait DownloadsReport
     /** @return list<string> Keterangan filter aktif untuk ditulis di bawah judul laporan. */
     abstract protected function filterSummary(): array;
 
+    /** @return array<string, string> kode => nama jenis laporan; kosong berarti laporan tunggal. */
+    protected function reportModes(): array
+    {
+        return [];
+    }
+
+    protected function buildReportMode(string $mode, Collection $records, array $subtitle): ReportTable
+    {
+        return $this->buildReport($records, $subtitle);
+    }
+
     protected function downloadActions(): ActionGroup
     {
+        if ($this->reportModes() !== []) {
+            $items = [];
+
+            foreach ($this->reportModes() as $mode => $label) {
+                $items[] = Action::make("dl_{$mode}_xlsx")->label("{$label} — Excel")->icon('heroicon-o-table-cells')
+                    ->action(fn () => $this->downloadReport('excel', $mode));
+                $items[] = Action::make("dl_{$mode}_pdf")->label("{$label} — PDF")->icon('heroicon-o-document-arrow-down')
+                    ->action(fn () => $this->downloadReport('pdf', $mode));
+            }
+
+            return ActionGroup::make($items)->label('Unduh')->icon('heroicon-o-arrow-down-tray')->color('gray')->button();
+        }
+
         return ActionGroup::make([
             Action::make('downloadExcel')
                 ->label('Excel (.xlsx)')
@@ -38,7 +62,7 @@ trait DownloadsReport
             ->button();
     }
 
-    protected function downloadReport(string $format)
+    protected function downloadReport(string $format, ?string $mode = null)
     {
         $records = $this->getFilteredSortedTableQuery()->get();
 
@@ -48,6 +72,9 @@ trait DownloadsReport
             $subtitle[] = 'Pencarian: "'.$this->tableSearch.'"';
         }
 
-        return ReportDownloader::respond($this->buildReport($records, $subtitle), $format);
+        return ReportDownloader::respond(
+            $mode === null ? $this->buildReport($records, $subtitle) : $this->buildReportMode($mode, $records, $subtitle),
+            $format,
+        );
     }
 }

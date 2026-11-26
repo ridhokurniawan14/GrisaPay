@@ -37,7 +37,7 @@ class Payment extends Model
 
     protected function casts(): array
     {
-        return ['amount' => 'integer', 'paid_at' => 'datetime', 'verified_at' => 'datetime'];
+        return ['amount' => 'integer', 'paid_at' => 'datetime', 'verified_at' => 'datetime', 'receipt_snapshot' => 'array'];
     }
 
     public function student(): BelongsTo
@@ -53,6 +53,11 @@ class Payment extends Model
     public function allocations(): HasMany
     {
         return $this->hasMany(PaymentAllocation::class);
+    }
+
+    public function prints(): HasMany
+    {
+        return $this->hasMany(PaymentPrint::class)->orderBy('copy_no');
     }
 
     public function voids(): HasMany

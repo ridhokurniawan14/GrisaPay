@@ -23,6 +23,8 @@ class AppServiceProvider extends ServiceProvider
      */
     public function boot(): void
     {
+        \App\Services\YearLock::register();
+        \Laravel\Passport\Passport::tokensCan(['bills:read' => 'Membaca status tagihan siswa']);
         // Super Admin lolos semua izin. Peran lain mengikuti hak akses dari halaman Peran.
         Gate::before(fn($user, string $ability) => $user->hasRole(RoleName::SuperAdmin->value) ? true : null);
 

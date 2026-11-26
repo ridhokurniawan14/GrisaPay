@@ -9,6 +9,7 @@ use App\Filament\Resources\Discounts\Pages\ListDiscounts;
 use App\Models\AcademicYear;
 use App\Models\Discount;
 use App\Services\DiscountService;
+use App\Support\Nav;
 use BackedEnum;
 use DomainException;
 use Filament\Actions\Action;
@@ -45,6 +46,23 @@ class DiscountResource extends Resource
         $user = auth()->user();
 
         return (bool) ($user?->can(PermissionName::DiscountsRequest->value) || $user?->can(PermissionName::DiscountsApprove->value));
+    }
+
+    /** Angka di menu: pengajuan diskon yang menunggu keputusan (hanya untuk yang berhak menyetujui). */
+    public static function getNavigationBadge(): ?string
+    {
+        if (! auth()->user()?->can(PermissionName::DiscountsApprove->value)) {
+            return null;
+        }
+
+        $count = Discount::query()->where('status', Discount::REQUESTED)->count();
+
+        return $count > 0 ? (string) $count : null;
+    }
+
+    public static function getNavigationBadgeColor(): ?string
+    {
+        return 'warning';
     }
 
     public static function canCreate(): bool
@@ -135,7 +153,7 @@ class DiscountResource extends Resource
             ->schema([
                 Textarea::make('note')->label('Catatan (opsional, berlaku untuk semua)')->rows(2)->maxLength(500),
             ])
-            ->action(function (Collection $records, array $data) use ($name, $label): void {
+            ->action(function (Collection $records, array $data, $livewire) use ($name, $label): void {
                 abort_unless(auth()->user()?->can(PermissionName::DiscountsApprove->value), 403);
 
                 $service = app(DiscountService::class);
@@ -157,6 +175,8 @@ class DiscountResource extends Resource
                     ->body($failed === [] ? null : Str::limit(implode('; ', $failed), 300))
                     ->duration($failed === [] ? 5000 : 10000)
                     ->send();
+
+                Nav::refresh($livewire);
             })
             ->deselectRecordsAfterCompletion();
     }
@@ -172,7 +192,7 @@ class DiscountResource extends Resource
             ->schema([
                 Textarea::make('note')->label('Catatan (opsional)')->rows(2)->maxLength(500),
             ])
-            ->action(function (Discount $record, array $data) use ($name, $label, $permission): void {
+            ->action(function (Discount $record, array $data, $livewire) use ($name, $label, $permission): void {
                 abort_unless(auth()->user()?->can($permission->value), 403);
 
                 try {
@@ -183,7 +203,9 @@ class DiscountResource extends Resource
                     return;
                 }
 
-                Notification::make()->success()->title("Diskon: {$label} berhasil")->send();
+                Notification::make()->success()->title("Diskon: {$label} berhasil")->duration(5000)->send();
+
+                Nav::refresh($livewire);
             });
     }
 

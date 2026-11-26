@@ -34,6 +34,8 @@ enum PermissionName: string
     case ReportsPeriodic = 'reports.periodic';
     case DashboardTreasurer = 'dashboard.treasurer';
     case DashboardPrincipal = 'dashboard.principal';
+    case ExpensesView = 'expenses.view';
+    case ExpensesManage = 'expenses.manage';
     case PortalStudent = 'portal.student';
     case PortalHomeroom = 'portal.homeroom';
 
@@ -65,6 +67,8 @@ enum PermissionName: string
         'reports.periodic' => ['Laporan', 'Rekap berkala'],
         'dashboard.treasurer' => ['Laporan', 'Dashboard bendahara'],
         'dashboard.principal' => ['Laporan', 'Dashboard kepala sekolah'],
+        'expenses.view' => ['Pengeluaran & kas', 'Melihat pengeluaran dan buku kas'],
+        'expenses.manage' => ['Pengeluaran & kas', 'Mencatat/membatalkan pengeluaran, pemasukan lain, mutasi, dan saldo awal'],
         'portal.student' => ['Portal', 'Portal siswa (tanggungan sendiri)'],
         'portal.homeroom' => ['Portal', 'Portal wali kelas (tanggungan kelasnya)'],
     ];
@@ -149,6 +153,8 @@ enum PermissionName: string
                 self::ReportsPeriodic,
                 self::DashboardTreasurer,
                 self::ActivityLogView,
+                self::ExpensesView,
+                self::ExpensesManage,
             ],
             RoleName::Cashier => [
                 self::StudentsView,
@@ -170,6 +176,7 @@ enum PermissionName: string
                 self::ReportsPeriodic,
                 self::DashboardPrincipal,
                 self::ActivityLogView,
+                self::ExpensesView,
             ],
             RoleName::HomeroomTeacher => [self::PortalHomeroom],
             RoleName::Student => [self::PortalStudent],

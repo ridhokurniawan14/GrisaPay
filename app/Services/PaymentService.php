@@ -9,6 +9,7 @@ use App\Models\PaymentAllocation;
 use App\Models\PaymentVoid;
 use App\Models\Student;
 use App\Models\User;
+use App\Support\PendingNotifier;
 use DomainException;
 use Illuminate\Support\Facades\DB;
 
@@ -36,10 +37,19 @@ final class PaymentService
         return DB::transaction(function () use ($data, $amount, $by): Payment {
             $student = Student::query()->lockForUpdate()->findOrFail($data['student_id']);
             $focus = $data['focus'] ?? null;
+            $key = $this->clean($data['idempotency_key'] ?? null);
+
+            // Pengiriman yang sama (klik ganda, koneksi putus lalu kirim ulang) mengembalikan pembayaran yang sudah ada.
+            if ($key !== null && ($existing = Payment::query()->where('idempotency_key', $key)->first()) !== null) {
+                return $existing;
+            }
+
+            $shift = app(CashShiftService::class)->requireOpen($by);
 
             $this->assertFits($student, $focus, $amount);
 
             $payment = Payment::query()->create([
+                'idempotency_key' => $key,
                 'student_id' => $student->id,
                 'academic_year_id' => AcademicYear::current()?->id ?? throw new DomainException('Tahun ajaran aktif belum ada.'),
                 'paid_at' => now(),
@@ -51,6 +61,7 @@ final class PaymentService
                 'note' => $this->clean($data['note'] ?? null),
                 'status' => Payment::PENDING,
                 'created_by' => $by->id,
+                'cash_shift_id' => $shift?->id,
             ]);
 
             if ($payment->method === Payment::CASH) {
@@ -58,6 +69,7 @@ final class PaymentService
                 $this->log($payment, $by, 'Pembayaran tunai dicatat');
             } else {
                 $this->log($payment, $by, 'Pembayaran dicatat, menunggu verifikasi');
+                DB::afterCommit(fn () => PendingNotifier::paymentPending($payment, $by));
             }
 
             return $payment->refresh();
@@ -117,6 +129,7 @@ final class PaymentService
 
             $void = $locked->voids()->create(['reason' => $reason, 'status' => PaymentVoid::REQUESTED, 'requested_by' => $by->id]);
             $this->log($locked, $by, 'Void diajukan', ['alasan' => $reason]);
+            DB::afterCommit(fn () => PendingNotifier::voidRequested($locked, $by));
 
             return $void;
         });
@@ -171,14 +184,31 @@ final class PaymentService
      */
     public function outstanding(Student $student, ?string $focus = null): array
     {
+        $result = [];
+
+        foreach ($this->outstandingDetail($student, $focus) as $row) {
+            $result[$row['id']] = $row['remaining'];
+        }
+
+        return $result;
+    }
+
+    /**
+     * Sama seperti outstanding(), lengkap dengan label struk (Tunggakan Sebelumnya / nama kategori).
+     *
+     * @return list<array{id: int, remaining: int, label: string, name: string, year: string, carry: bool, current: bool, category_id: int, category: string}>
+     */
+    public function outstandingDetail(Student $student, ?string $focus = null): array
+    {
         $current = AcademicYear::current();
+        $currentStart = $current?->start_date->format('Y-m-d');
 
         $items = BillItem::query()
             ->join('bills', 'bills.id', '=', 'bill_items.bill_id')
             ->join('academic_years', 'academic_years.id', '=', 'bills.academic_year_id')
             ->join('fee_categories', 'fee_categories.id', '=', 'bill_items.fee_category_id')
             ->where('bills.student_id', $student->id)
-            ->select('bill_items.*', 'academic_years.start_date as ay_start', 'bills.academic_year_id as ay_id')
+            ->select('bill_items.*', 'academic_years.start_date as ay_start', 'bills.academic_year_id as ay_id', 'fee_categories.receipt_label as cat_label', 'academic_years.code as ay_code')
             ->orderBy('academic_years.start_date')
             ->orderBy('fee_categories.sort_order')
             ->orderBy('bill_items.sort_order')
@@ -186,10 +216,13 @@ final class PaymentService
             ->get();
 
         if ($focus === 'carry' && $current !== null) {
-            $items = $items->filter(fn ($i): bool => $i->ay_start < $current->start_date->format('Y-m-d'));
+            $items = $items->filter(fn ($i): bool => substr((string) $i->ay_start, 0, 10) < $currentStart);
         } elseif (is_string($focus) && str_starts_with($focus, 'cat:') && $current !== null) {
             $categoryId = (int) substr($focus, 4);
             $items = $items->filter(fn ($i): bool => (int) $i->ay_id === $current->id && (int) $i->fee_category_id === $categoryId);
+        } elseif (is_string($focus) && str_starts_with($focus, 'item:')) {
+            $itemId = (int) substr($focus, 5);
+            $items = $items->filter(fn ($i): bool => (int) $i->id === $itemId);
         }
 
         $paid = BillSummary::paidByItem($items->pluck('id')->all());
@@ -199,11 +232,48 @@ final class PaymentService
             $remaining = max(0, (int) $item->amount - (int) $item->discount_amount - (int) ($paid[$item->id] ?? 0));
 
             if ($remaining > 0) {
-                $result[$item->id] = $remaining;
+                $isCarry = $currentStart !== null && substr((string) $item->ay_start, 0, 10) < $currentStart;
+
+                $result[] = [
+                    'id' => (int) $item->id,
+                    'remaining' => $remaining,
+                    'label' => $isCarry ? ReceiptSnapshot::CARRY : (string) $item->cat_label,
+                    'name' => (string) $item->name,
+                    'year' => (string) $item->ay_code,
+                    'carry' => $isCarry,
+                    'current' => $current !== null && (int) $item->ay_id === $current->id,
+                    'category_id' => (int) $item->fee_category_id,
+                    'category' => (string) $item->cat_label,
+                ];
             }
         }
 
         return $result;
+    }
+
+    /**
+     * Pratinjau pembagian uang untuk layar kasir.
+     *
+     * @return array{rows: list<array{label: string, amount: int}>, leftover: int, max: int}
+     */
+    public function preview(Student $student, ?string $focus, int $amount): array
+    {
+        $detail = $this->outstandingDetail($student, $focus ?: null);
+        $labels = array_column($detail, 'label', 'id');
+        $plan = PaymentAllocator::allocate(array_column($detail, 'remaining', 'id'), $amount);
+
+        $rows = [];
+
+        foreach ($plan['allocations'] as $id => $part) {
+            $label = $labels[$id];
+            $rows[$label] = ($rows[$label] ?? 0) + $part;
+        }
+
+        return [
+            'rows' => array_map(fn (string $l, int $a): array => ['label' => $l, 'amount' => $a], array_keys($rows), array_values($rows)),
+            'leftover' => $plan['leftover'],
+            'max' => (int) array_sum(array_column($detail, 'remaining')),
+        ];
     }
 
     private function assertFits(Student $student, ?string $focus, int $amount): void
@@ -239,6 +309,9 @@ final class PaymentService
             'verified_by' => $by->id,
             'verified_at' => now(),
         ]);
+
+        // Isi struk dibekukan sekarang (status sudah Sah, jadi pembayaran ini ikut terhitung).
+        $payment->update(['receipt_snapshot' => ReceiptSnapshot::build($payment->refresh())]);
     }
 
     /** Berurutan per tahun kalender, tanpa lompatan: dikunci selama transaksi. */

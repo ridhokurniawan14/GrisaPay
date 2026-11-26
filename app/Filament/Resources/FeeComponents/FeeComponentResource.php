@@ -24,7 +24,7 @@ class FeeComponentResource extends Resource
 {
     protected static ?string $model = FeeComponent::class;
 
-    protected static string|BackedEnum|null $navigationIcon = 'heroicon-o-banknotes';
+    protected static string|BackedEnum|null $navigationIcon = 'heroicon-o-clipboard-document-list';
 
     protected static string|UnitEnum|null $navigationGroup = 'Keuangan';
 
