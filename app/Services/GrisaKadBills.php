@@ -4,6 +4,7 @@ namespace App\Services;
 
 use App\Models\AcademicYear;
 use App\Models\FeeCategory;
+use App\Models\Payment;
 use App\Models\Student;
 use App\Models\StudentEnrollment;
 
@@ -63,6 +64,34 @@ final class GrisaKadBills
             'total' => $this->amounts($t),
             'as_of' => now()->toIso8601String(),
         ];
+    }
+
+    /**
+     * Riwayat pembayaran siswa (terbaru dulu): hanya yang sah atau menunggu verifikasi; void/ditolak tidak ditampilkan.
+     *
+     * @return list<array<string, mixed>>
+     */
+    public function payments(Student $student, int $limit = 100): array
+    {
+        return Payment::query()
+            ->where('student_id', $student->id)
+            ->whereIn('status', [Payment::PAID, Payment::PENDING])
+            ->with(['allocations.billItem', 'academicYear'])
+            ->orderByDesc('paid_at')->orderByDesc('id')
+            ->limit($limit)
+            ->get()
+            ->map(fn (Payment $p): array => [
+                'receipt_no' => $p->receipt_no ?: null,
+                'paid_at' => $p->paid_at?->toIso8601String(),
+                'method' => $p->method,
+                'method_label' => $p->methodText(),
+                'amount' => (int) $p->amount,
+                'status' => $p->status === Payment::PAID ? 'sah' : 'menunggu',
+                'academic_year' => $p->academicYear?->code,
+                'items' => $p->allocations
+                    ->map(fn ($a): array => ['label' => (string) ($a->billItem?->name ?? 'Pembayaran'), 'amount' => (int) $a->amount])
+                    ->values()->all(),
+            ])->values()->all();
     }
 
     /** Status lunas/belum seluruh siswa satu kelas (tanpa kategori), untuk wali kelas. @return list<array<string, mixed>> */

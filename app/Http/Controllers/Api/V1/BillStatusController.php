@@ -15,7 +15,9 @@ use Illuminate\Http\Request;
 /** API baca-saja tagihan untuk GrisaKAD. Tidak ada endpoint tulis. 404 yang sama untuk "tidak ada" dan "tidak berhak". */
 class BillStatusController extends Controller
 {
-    public function __construct(private readonly GrisaKadBills $bills, private readonly BillAccess $access) {}
+    public function __construct(private readonly GrisaKadBills $bills, private readonly BillAccess $access)
+    {
+    }
 
     private function actor(Request $request): BillActor
     {
@@ -30,6 +32,27 @@ class BillStatusController extends Controller
         abort_if($student === null || ! $this->access->student($this->actor($request), $student), 404, 'Siswa tidak ditemukan.');
 
         return response()->json(['data' => $this->bills->forStudent($student)]);
+    }
+
+    /** GET /api/v1/students/{ref}/payments — riwayat pembayaran (hak akses sama dengan tagihan siswa). */
+    public function studentPayments(Request $request, string $ref): JsonResponse
+    {
+        $student = $this->bills->resolve($ref);
+
+        abort_if($student === null || ! $this->access->student($this->actor($request), $student), 404, 'Siswa tidak ditemukan.');
+
+        return response()->json(['data' => $this->bills->payments($student)]);
+    }
+
+    /** GET /api/v1/me/payments — riwayat pembayaran siswa yang sedang masuk. */
+    public function myPayments(Request $request): JsonResponse
+    {
+        $actor = $this->actor($request);
+        $student = $actor->type === 'student' ? Student::query()->where('grisaid_id', $actor->studentUuid)->first() : null;
+
+        abort_if($student === null, 404, 'Akun ini bukan akun siswa.');
+
+        return response()->json(['data' => $this->bills->payments($student)]);
     }
 
     /** GET /api/v1/classes/{uuid}/bills */
@@ -64,7 +87,7 @@ class BillStatusController extends Controller
 
         $classes = Classroom::query()->where('academic_year_id', $year->id)->whereIn('grisaid_id', $actor->classroomUuids)->orderBy('name')->get();
 
-        return response()->json(['data' => $classes->map(fn(Classroom $c) => $this->classPayload($c, $year))->values()]);
+        return response()->json(['data' => $classes->map(fn (Classroom $c) => $this->classPayload($c, $year))->values()]);
     }
 
     /** @return array<string, mixed> */
