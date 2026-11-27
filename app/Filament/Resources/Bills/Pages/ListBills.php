@@ -34,7 +34,7 @@ class ListBills extends ListRecords
                 Action::make('arrearTemplate')
                     ->label('Unduh template Excel')
                     ->icon('heroicon-o-document-arrow-down')
-                    ->action(fn () => ArrearTemplate::download()),
+                    ->action(fn() => ArrearTemplate::download()),
                 Action::make('importArrears')
                     ->label('Impor dari Excel / CSV')
                     ->icon('heroicon-o-arrow-up-tray')
@@ -50,7 +50,10 @@ class ListBills extends ListRecords
                             ->visibility('private')
                             ->acceptedFileTypes([
                                 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-                                'text/csv', 'application/csv', 'text/plain', 'application/vnd.ms-excel',
+                                'text/csv',
+                                'application/csv',
+                                'text/plain',
+                                'application/vnd.ms-excel',
                             ])
                             ->storeFileNamesIn('original_name')
                             ->maxSize(10240),
@@ -83,11 +86,11 @@ class ListBills extends ListRecords
                         }
 
                         $errors = $report['errors'];
-                        $body = "Baris baru {$report['created']} · Dilewati (sudah ada) {$report['skipped']} · Bermasalah ".count($errors)
-                            .' · Total Rp '.number_format($report['total_amount'], 0, ',', '.');
+                        $body = "Baris baru {$report['created']} · Dilewati (sudah ada) {$report['skipped']} · Bermasalah " . count($errors)
+                            . ' · Total Rp ' . number_format($report['total_amount'], 0, ',', '.');
 
                         if ($errors !== []) {
-                            $body .= ' · '.Str::limit(implode('; ', array_slice($errors, 0, 3)), 300);
+                            $body .= ' · ' . Str::limit(implode('; ', array_slice($errors, 0, 3)), 300);
                         }
 
                         Notification::make()
@@ -102,7 +105,7 @@ class ListBills extends ListRecords
                 ->icon('heroicon-o-archive-box-arrow-down')
                 ->color('gray')
                 ->button()
-                ->visible(fn (): bool => (bool) auth()->user()?->can(PermissionName::BillsManage->value)),
+                ->visible(fn(): bool => (bool) auth()->user()?->can(PermissionName::BillsManage->value)),
         ];
     }
 
@@ -132,16 +135,23 @@ class ListBills extends ListRecords
         $lines = [];
 
         $year = AcademicYear::query()->find($filters['academic_year_id']['value'] ?? null);
-        $lines[] = 'Tahun ajaran: '.($year?->code ?? 'semua');
+        $lines[] = 'Tahun ajaran: ' . ($year?->code ?? 'semua');
 
         if (filled($filters['grade']['value'] ?? null)) {
-            $lines[] = 'Tingkat: Kelas '.$filters['grade']['value'];
+            $lines[] = 'Tingkat: Kelas ' . $filters['grade']['value'];
         }
 
         if (filled($filters['classroom_name']['value'] ?? null)) {
-            $lines[] = 'Kelas: '.$filters['classroom_name']['value'];
+            $lines[] = 'Kelas: ' . $filters['classroom_name']['value'];
         }
 
         return $lines;
+    }
+    protected function reportModeDescriptions(): array
+    {
+        return [
+            'ringkas' => 'Satu baris per siswa: total tagihan, diskon, terbayar, dan sisa.',
+            'rincian' => 'Satu baris per item tagihan untuk setiap siswa.',
+        ];
     }
 }

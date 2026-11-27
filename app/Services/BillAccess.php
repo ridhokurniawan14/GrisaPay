@@ -2,38 +2,46 @@
 
 namespace App\Services;
 
-use App\Enums\PermissionName;
+use App\Models\AcademicYear;
+use App\Models\Classroom;
 use App\Models\Student;
-use App\Models\User;
+use App\Models\StudentEnrollment;
+use App\Support\BillActor;
 
 /**
- * Siapa boleh melihat tagihan siapa lewat API. Token HARUS milik pengguna (bukan client credentials).
- *  - staf (bills.view)        : semua siswa
- *  - siswa (portal.student)   : hanya dirinya  -> butuh tautan akun-siswa (users.student_id), BELUM ada
- *  - wali kelas (portal.homeroom): hanya kelasnya -> butuh modul wali kelas di GrisaID, BELUM ada
- * Selama dua tautan itu belum ada, siswa & wali kelas ditolak (aman: gagal tertutup).
+ * Siapa boleh melihat tagihan siapa:
+ *  - staf  : semua
+ *  - siswa : hanya dirinya
+ *  - guru  : hanya siswa di kelas yang dia walikan (tahun ajaran aktif)
  */
 final class BillAccess
 {
-    public function all(User $user): bool
+    public function student(BillActor $actor, Student $student): bool
     {
-        return $user->can(PermissionName::BillsView->value);
+        return match ($actor->type) {
+            'staff' => true,
+            'student' => $actor->studentUuid !== null && $actor->studentUuid === $student->grisaid_id,
+            'teacher' => $this->inHomeroom($actor, $student),
+            default => false,
+        };
     }
 
-    public function student(User $user, Student $student): bool
+    public function classroom(BillActor $actor, Classroom $classroom): bool
     {
-        if ($this->all($user)) {
-            return true;
+        return $actor->isStaff() || ($actor->type === 'teacher' && in_array($classroom->grisaid_id, $actor->classroomUuids, true));
+    }
+
+    private function inHomeroom(BillActor $actor, Student $student): bool
+    {
+        $year = AcademicYear::current();
+
+        if ($year === null || $actor->classroomUuids === []) {
+            return false;
         }
 
-        return $user->can(PermissionName::PortalStudent->value)
-            && isset($user->student_id) && (int) $user->student_id === (int) $student->id;
-    }
-
-    /** @param list<int> $classroomIds kelas yang diampu (diisi nanti dari modul wali kelas) */
-    public function classroom(User $user, int $classroomId, array $classroomIds = []): bool
-    {
-        return $this->all($user)
-            || ($user->can(PermissionName::PortalHomeroom->value) && in_array($classroomId, $classroomIds, true));
+        return StudentEnrollment::query()
+            ->where('student_id', $student->id)->where('academic_year_id', $year->id)
+            ->whereHas('classroom', fn($q) => $q->whereIn('grisaid_id', $actor->classroomUuids))
+            ->exists();
     }
 }

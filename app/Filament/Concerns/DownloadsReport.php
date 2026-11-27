@@ -6,6 +6,9 @@ use App\Exports\ReportDownloader;
 use App\Exports\ReportTable;
 use Filament\Actions\Action;
 use Filament\Actions\ActionGroup;
+use Filament\Forms\Components\Select;
+use Filament\Forms\Components\ToggleButtons;
+use Filament\Schemas\Components\Utilities\Get;
 use Illuminate\Database\Eloquent\Collection;
 
 /**
@@ -26,24 +29,49 @@ trait DownloadsReport
         return [];
     }
 
+    /** @return array<string, string> kode => penjelasan singkat (tampil di bawah pilihan jenis laporan). */
+    protected function reportModeDescriptions(): array
+    {
+        return [];
+    }
+
     protected function buildReportMode(string $mode, Collection $records, array $subtitle): ReportTable
     {
         return $this->buildReport($records, $subtitle);
     }
 
-    protected function downloadActions(): ActionGroup
+    protected function downloadActions(): Action|ActionGroup
     {
         if ($this->reportModes() !== []) {
-            $items = [];
+            $modes = $this->reportModes();
 
-            foreach ($this->reportModes() as $mode => $label) {
-                $items[] = Action::make("dl_{$mode}_xlsx")->label("{$label} — Excel")->icon('heroicon-o-table-cells')
-                    ->action(fn () => $this->downloadReport('excel', $mode));
-                $items[] = Action::make("dl_{$mode}_pdf")->label("{$label} — PDF")->icon('heroicon-o-document-arrow-down')
-                    ->action(fn () => $this->downloadReport('pdf', $mode));
-            }
-
-            return ActionGroup::make($items)->label('Unduh')->icon('heroicon-o-arrow-down-tray')->color('gray')->button();
+            return Action::make('unduh')
+                ->label('Unduh')
+                ->icon('heroicon-o-arrow-down-tray')
+                ->color('gray')
+                ->modalHeading('Unduh laporan')
+                ->modalDescription(fn (): string => implode(' · ', $this->filterSummary()))
+                ->modalIcon('heroicon-o-arrow-down-tray')
+                ->modalWidth('lg')
+                ->modalSubmitActionLabel('Unduh')
+                ->schema([
+                    Select::make('mode')
+                        ->label('Jenis laporan')
+                        ->options($modes)
+                        ->default(array_key_first($modes))
+                        ->required()
+                        ->native(false)
+                        ->live()
+                        ->helperText(fn (Get $get): ?string => $this->reportModeDescriptions()[$get('mode')] ?? null),
+                    ToggleButtons::make('format')
+                        ->label('Format')
+                        ->options(['excel' => 'Excel (.xlsx)', 'pdf' => 'PDF (siap cetak)'])
+                        ->icons(['excel' => 'heroicon-o-table-cells', 'pdf' => 'heroicon-o-document-arrow-down'])
+                        ->default('excel')
+                        ->inline()
+                        ->required(),
+                ])
+                ->action(fn (array $data) => $this->downloadReport((string) $data['format'], (string) $data['mode']));
         }
 
         return ActionGroup::make([

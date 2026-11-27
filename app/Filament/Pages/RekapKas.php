@@ -4,13 +4,18 @@ namespace App\Filament\Pages;
 
 use App\Enums\PermissionName;
 use App\Exports\CashRecapReport;
+use App\Exports\GroupedReport;
 use App\Exports\ReportDownloader;
 use App\Models\Payment;
 use App\Models\User;
 use App\Services\CashRecap;
 use BackedEnum;
 use Filament\Actions\Action;
-use Filament\Actions\ActionGroup;
+use Filament\Forms\Components\Select;
+use Filament\Forms\Components\TextInput;
+use Filament\Forms\Components\ToggleButtons;
+use Illuminate\Support\Facades\Cache;
+use Filament\Schemas\Components\Utilities\Get;
 use Filament\Pages\Page;
 use Illuminate\Support\Carbon;
 use Livewire\Attributes\Computed;
@@ -129,7 +134,7 @@ class RekapKas extends Page
         return $lines;
     }
 
-    public function download(string $mode, string $format)
+    public function download(string $mode, string $format, array $options = [])
     {
         abort_unless(static::canAccess(), 403);
 
@@ -137,10 +142,11 @@ class RekapKas extends Page
         $payments = CashRecap::payments($a, $b, $this->method ?: null, $this->cashier !== '' ? (int) $this->cashier : null);
         $summary = CashRecap::summarize($payments);
 
-        return ReportDownloader::respond(
-            CashRecapReport::build($mode, $payments, $summary, $this->periodLines()),
-            $format,
-        );
+        $report = CashRecapReport::build($mode, $payments, $summary, $this->periodLines(), $options);
+
+        return $report instanceof GroupedReport
+            ? $report->download($format)
+            : ReportDownloader::respond($report, $format);
     }
 
     /** Modal daftar pembayaran di balik kotak/angka yang diklik (halaman tetap di Rekap Kas). */
@@ -171,17 +177,56 @@ class RekapKas extends Page
 
     protected function getHeaderActions(): array
     {
-        $items = [];
+        $options = [];
 
-        foreach (CashRecapReport::MODES as $mode => $label) {
-            $items[] = Action::make("dl_{$mode}_pdf")->label("{$label} — PDF")->icon('heroicon-o-document-arrow-down')
-                ->action(fn () => $this->download($mode, 'pdf'));
-            $items[] = Action::make("dl_{$mode}_xlsx")->label("{$label} — Excel")->icon('heroicon-o-table-cells')
-                ->action(fn () => $this->download($mode, 'excel'));
+        foreach (CashRecapReport::GROUPS as $group => $modes) {
+            foreach ($modes as $mode) {
+                $options[$group][$mode] = CashRecapReport::MODES[$mode];
+            }
         }
 
         return [
-            ActionGroup::make($items)->label('Unduh')->icon('heroicon-o-arrow-down-tray')->color('gray')->button(),
+            Action::make('unduh')
+                ->label('Unduh')
+                ->icon('heroicon-o-arrow-down-tray')
+                ->color('gray')
+                ->modalHeading('Unduh laporan')
+                ->modalDescription(fn (): string => implode(' · ', $this->periodLines()))
+                ->modalIcon('heroicon-o-arrow-down-tray')
+                ->modalWidth('lg')
+                ->modalSubmitActionLabel('Unduh')
+                ->schema([
+                    Select::make('mode')
+                        ->label('Jenis laporan')
+                        ->options($options)
+                        ->default('buku')
+                        ->required()
+                        ->native(false)
+                        ->live()
+                        ->helperText(fn (Get $get): ?string => CashRecapReport::DESCRIPTIONS[$get('mode')] ?? null),
+                    TextInput::make('komite')
+                        ->label('Nama Ketua Komite (opsional)')
+                        ->helperText('Dicetak di bawah tanda tangan. Kosongkan bila ingin ditulis tangan. Diingat untuk unduhan berikutnya.')
+                        ->default(fn (): string => (string) Cache::get('grisapay.ketua_komite', ''))
+                        ->maxLength(120)
+                        ->visible(fn (Get $get): bool => $get('mode') === 'komite'),
+                    ToggleButtons::make('format')
+                        ->label('Format')
+                        ->options(['excel' => 'Excel (.xlsx)', 'pdf' => 'PDF (siap cetak)'])
+                        ->icons(['excel' => 'heroicon-o-table-cells', 'pdf' => 'heroicon-o-document-arrow-down'])
+                        ->default('excel')
+                        ->inline()
+                        ->required(),
+                ])
+                ->action(function (array $data) {
+                    $komite = trim((string) ($data['komite'] ?? ''));
+
+                    if ($data['mode'] === 'komite') {
+                        Cache::forever('grisapay.ketua_komite', $komite);
+                    }
+
+                    return $this->download((string) $data['mode'], (string) $data['format'], ['komite' => $komite]);
+                }),
         ];
     }
 }

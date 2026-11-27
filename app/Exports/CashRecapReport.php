@@ -16,13 +16,35 @@ final class CashRecapReport
         'tingkat' => 'Per tingkat kelas',
         'kelas' => 'Per kelas',
         'rincian' => 'Rincian transaksi',
+        'buku' => 'Buku penerimaan harian — untuk Kepala Sekolah',
+        'komite' => 'Laporan penerimaan harian — untuk Komite (tanpa tunggakan)',
+        'buku_rinci' => 'Buku penerimaan per transaksi',
+    ];
+
+    /** Pengelompokan & penjelasan singkat untuk pilihan di jendela Unduh. */
+    public const GROUPS = [
+        'Buku penerimaan' => ['buku', 'komite', 'buku_rinci'],
+        'Ringkasan' => ['harian', 'kategori', 'item', 'tingkat', 'kelas'],
+        'Detail' => ['rincian'],
+    ];
+
+    public const DESCRIPTIONS = [
+        'buku' => 'Satu baris per tanggal, total pemasukan tiap rincian tarif termasuk tunggakan. Tanda tangan: Kepala Sekolah dan Bendahara.',
+        'komite' => 'Sama seperti buku harian, tetapi tanpa kolom tunggakan. Tanda tangan: Ketua Komite, Kepala Sekolah, Bendahara.',
+        'buku_rinci' => 'Satu baris per pembayaran, kolom uang dipecah per rincian tarif.',
+        'harian' => 'Jumlah transaksi dan total per hari, dipisah Tunai / Transfer / QRIS.',
+        'kategori' => 'Total pemasukan per kategori tarif.',
+        'item' => 'Total pemasukan per rincian tagihan.',
+        'tingkat' => 'Pemasukan per hari menurut tingkat kelas siswa (X / XI / XII / Alumni).',
+        'kelas' => 'Pemasukan per kelas.',
+        'rincian' => 'Daftar lengkap transaksi beserta kasir dan rincian yang dibayar.',
     ];
 
     /**
      * @param  Collection<int, Payment>  $payments
      * @param  list<string>  $subtitle
      */
-    public static function build(string $mode, Collection $payments, array $summary, array $subtitle): ReportTable
+    public static function build(string $mode, Collection $payments, array $summary, array $subtitle, array $options = []): ReportTable|GroupedReport
     {
         $stamp = now()->format('Ymd-His');
 
@@ -40,6 +62,9 @@ final class CashRecapReport
             'tingkat' => self::byGrade($summary, $subtitle, $stamp),
             'kelas' => self::byClass($summary, $subtitle, $stamp),
             'rincian' => self::detail($payments, $subtitle, $stamp),
+            'buku' => DailyLedgerReport::build($payments, $subtitle, $stamp),
+            'komite' => DailyLedgerReport::build($payments, $subtitle, $stamp, true, (string) ($options['komite'] ?? '')),
+            'buku_rinci' => ReceiptLedgerReport::build($payments, $subtitle, $stamp),
             default => self::byDay($summary, $subtitle, $stamp),
         };
     }

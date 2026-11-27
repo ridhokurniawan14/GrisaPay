@@ -18,4 +18,5 @@ return [
     // Batas waktu satu permintaan, dalam detik.
     'timeout' => (int) env('GRISAID_TIMEOUT', 15),
 
+    'user_client_ids' => env('GRISAID_USER_CLIENT_IDS', ''),
 ];
