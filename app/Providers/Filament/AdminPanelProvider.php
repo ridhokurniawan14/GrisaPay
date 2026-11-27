@@ -35,6 +35,7 @@ class AdminPanelProvider extends PanelProvider
                 'primary' => self::primaryColor(),
             ])
             ->brandName('GrisaPay')
+            ->favicon(fn(): ?string => self::faviconUrl())
             // Urutan menu: pekerjaan harian di atas, pengaturan satu kali & sistem di bawah.
             ->navigation(function (NavigationBuilder $builder) use ($panel): NavigationBuilder {
                 $layout = [
@@ -139,6 +140,18 @@ class AdminPanelProvider extends PanelProvider
             return ThemeColor::sanitize(InstitutionSetting::current()->primary_color);
         } catch (\Throwable) {
             return ThemeColor::DEFAULT;
+        }
+    }
+    private static function faviconUrl(): ?string
+    {
+        try {
+            $path = InstitutionSetting::current()->logo_path;
+
+            return $path && \Illuminate\Support\Facades\Storage::disk('public')->exists($path)
+                ? '/storage/' . ltrim($path, '/')
+                : null;
+        } catch (\Throwable) {
+            return null;
         }
     }
 }
