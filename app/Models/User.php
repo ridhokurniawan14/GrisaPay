@@ -2,6 +2,8 @@
 
 namespace App\Models;
 
+use Filament\Auth\MultiFactor\App\Contracts\HasAppAuthentication;
+use Filament\Auth\MultiFactor\App\Contracts\HasAppAuthenticationRecovery;
 use Filament\Models\Contracts\FilamentUser;
 use Filament\Panel;
 use Illuminate\Database\Eloquent\Attributes\Fillable;
@@ -15,8 +17,8 @@ use Spatie\Permission\Traits\HasRoles;
 use Laravel\Passport\HasApiTokens;
 
 #[Fillable(['name', 'email', 'password', 'is_active'])]
-#[Hidden(['password', 'remember_token'])]
-class User extends Authenticatable implements FilamentUser
+#[Hidden(['password', 'remember_token', 'app_authentication_secret', 'app_authentication_recovery_codes'])]
+class User extends Authenticatable implements FilamentUser, HasAppAuthentication, HasAppAuthenticationRecovery
 {
     use HasFactory, HasRoles, LogsActivity, Notifiable, HasApiTokens;
 
@@ -26,6 +28,8 @@ class User extends Authenticatable implements FilamentUser
             'email_verified_at' => 'datetime',
             'password' => 'hashed',
             'is_active' => 'boolean',
+            'app_authentication_secret' => 'encrypted',
+            'app_authentication_recovery_codes' => 'encrypted:array',
         ];
     }
 
@@ -36,11 +40,39 @@ class User extends Authenticatable implements FilamentUser
 
     public function getActivitylogOptions(): LogOptions
     {
-        // Daftar kolom EKSPLISIT: password dan token tidak pernah ikut tercatat.
+        // Daftar kolom EKSPLISIT: password, token, dan rahasia 2FA tidak pernah ikut tercatat.
         return LogOptions::defaults()
             ->useLogName('user')
             ->logOnly(['name', 'email', 'is_active'])
             ->logOnlyDirty()
             ->dontLogEmptyChanges();
+    }
+
+    // --- 2FA aplikasi authenticator (panel admin) ---
+    public function getAppAuthenticationSecret(): ?string
+    {
+        return $this->app_authentication_secret;
+    }
+
+    public function saveAppAuthenticationSecret(?string $secret): void
+    {
+        $this->app_authentication_secret = $secret;
+        $this->save();
+    }
+
+    public function getAppAuthenticationHolderName(): string
+    {
+        return (string) ($this->email ?: $this->name);
+    }
+
+    public function getAppAuthenticationRecoveryCodes(): ?array
+    {
+        return $this->app_authentication_recovery_codes;
+    }
+
+    public function saveAppAuthenticationRecoveryCodes(?array $codes): void
+    {
+        $this->app_authentication_recovery_codes = $codes;
+        $this->save();
     }
 }

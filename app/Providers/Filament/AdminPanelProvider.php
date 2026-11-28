@@ -4,6 +4,7 @@ namespace App\Providers\Filament;
 
 use App\Models\InstitutionSetting;
 use App\Support\ThemeColor;
+use Filament\Auth\MultiFactor\App\AppAuthentication;
 use Filament\View\PanelsRenderHook;
 use Illuminate\Support\Facades\Blade;
 use Filament\Http\Middleware\Authenticate;
@@ -31,8 +32,12 @@ class AdminPanelProvider extends PanelProvider
             ->id('admin')
             ->path('admin')
             ->login()
+            ->profile(\App\Filament\Pages\EditProfile::class)
             ->colors([
                 'primary' => self::primaryColor(),
+            ])
+            ->multiFactorAuthentication([
+                AppAuthentication::make()->recoverable(),
             ])
             ->brandName('GrisaPay')
             ->favicon(fn(): ?string => self::faviconUrl())
